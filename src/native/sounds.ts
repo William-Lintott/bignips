@@ -11,7 +11,9 @@ const SOUND_LEAVE = "discord-call-leave.wav";
 // ------------------------------------------------------------------------------
 
 function loadSound(filename: string): string {
-    const soundPath = join(app.getAppPath(), "assets", "desktop", "sounds", filename);
+    const soundPath = app.isPackaged
+        ? join(process.resourcesPath, "sounds", filename)
+        : join(app.getAppPath(), "assets", "desktop", "sounds", filename);
     return `data:audio/wav;base64,${readFileSync(soundPath).toString("base64")}`;
 }
 

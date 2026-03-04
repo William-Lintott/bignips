@@ -10,7 +10,7 @@ import { PublisherGithub } from "@electron-forge/publisher-github";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
-// import { globSync } from "node:fs";
+ import { globSync } from "node:fs";
 
 const STRINGS = {
   author: "Revolt Platforms LTD",
@@ -130,16 +130,13 @@ if (!process.env.PLATFORM) {
 }
 
 const config: ForgeConfig = {
-  packagerConfig: {
-    asar: true,
-    name: STRINGS.name,
-    executableName: STRINGS.execName,
-    icon: `${ASSET_DIR}/icon`,
-    // extraResource: [
-    //   // include all the asset files
-    //   ...globSync(ASSET_DIR + "/**/*"),
-    // ],
-  },
+    packagerConfig: {
+        asar: true,
+        name: STRINGS.name,
+        executableName: STRINGS.execName,
+        icon: `${ASSET_DIR}/icon`,
+        extraResource: ["assets/desktop/sounds"],
+    },
   rebuildConfig: {},
   makers,
   plugins: [
