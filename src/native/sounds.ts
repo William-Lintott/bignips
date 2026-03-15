@@ -1,14 +1,10 @@
 ﻿import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
 import { app } from "electron";
 
-// --- Sound file configuration -------------------------------------------------
-// Set each variable to the filename of an wav in assets/desktop/sounds/
 const SOUND_MESSAGE = "discord-notification.wav";
 const SOUND_JOIN = "discord-call-join.wav";
 const SOUND_LEAVE = "discord-call-leave.wav";
-// ------------------------------------------------------------------------------
 
 function loadSound(filename: string): string {
     const soundPath = app.isPackaged
@@ -17,28 +13,51 @@ function loadSound(filename: string): string {
     return `data:audio/wav;base64,${readFileSync(soundPath).toString("base64")}`;
 }
 
-/**
- * Inject sound playback into the renderer page via WebSocket interception.
- * Only plays sounds relevant to the current user.
- */
 export function injectSounds(webContents: Electron.WebContents) {
-    // load all sounds once at startup
     const sounds = {
         message: loadSound(SOUND_MESSAGE),
         joinCall: loadSound(SOUND_JOIN),
         leaveCall: loadSound(SOUND_LEAVE),
     };
-
     webContents.on("did-finish-load", () => {
         webContents.executeJavaScript(`
       (function() {
         if (window.__soundsInjected) return;
         window.__soundsInjected = true;
-
         const sounds = ${JSON.stringify(sounds)};
-
         let currentUserId = null;
         let currentChannelId = null;
+        let notificationSettings = null;
+
+        function parseNotificationSettings(raw) {
+          try { return JSON.parse(raw[1]); } catch { return null; }
+        }
+
+        function shouldPlayMessageSound(data) {
+          const serverId = data.member?._id?.server;
+
+          // No server = DM, always play
+          if (!serverId) return true;
+
+          // No settings loaded yet, default to playing
+          if (!notificationSettings) return true;
+
+          // Muted server
+          if (serverId in (notificationSettings.server_mutes ?? {})) return false;
+
+          const level = notificationSettings.server?.hasOwnProperty(serverId)
+            ? notificationSettings.server[serverId]
+            : "all";
+
+          if (level === "none") return false;
+
+          if (level === "mention") {
+            return typeof data.content === "string" &&
+              data.content.includes(\`<@\${currentUserId}>\`);
+          }
+
+          return true;
+        }
 
         function playSound(dataUrl) {
           try {
@@ -52,45 +71,48 @@ export function injectSounds(webContents: Electron.WebContents) {
         window.WebSocket = class extends OriginalWebSocket {
           constructor(...args) {
             super(...args);
-
             this.addEventListener("message", (event) => {
               try {
                 const data = JSON.parse(event.data);
-                            console.log(data);
+                console.log(data);
 
-                // grab your own user ID from the ready payload
+                // Grab own user ID from the ready payload
                 if (data.type === "Ready" && data.users) {
                   const self = data.users.find(u => u.relationship === "User");
                   if (self) currentUserId = self._id;
                 }
 
-                // you joined a voice channel
+                // Track notification settings updates
+                if (data.type === "UserSettingsUpdate" && data.update?.notifications) {
+                  notificationSettings = parseNotificationSettings(data.update.notifications);
+                }
+
+                // You joined a voice channel
                 if (data.type === "VoiceChannelJoin" && data.state?.id === currentUserId) {
                   currentChannelId = data.id;
                   playSound(sounds.joinCall);
                 }
 
-                // you left a voice channel
+                // You left a voice channel
                 if (data.type === "VoiceChannelLeave" && data.user === currentUserId) {
                   currentChannelId = null;
                   playSound(sounds.leaveCall);
                 }
 
-                // someone else joined the current voice channel
+                // Someone else joined the current voice channel
                 if (data.type === "VoiceChannelJoin" && data.state?.id !== currentUserId && currentChannelId && data.id === currentChannelId) {
                   playSound(sounds.joinCall);
                 }
 
-                // someone else left the current voice channel
+                // Someone else left the current voice channel
                 if (data.type === "VoiceChannelLeave" && data.user !== currentUserId && currentChannelId && data.id === currentChannelId) {
                   playSound(sounds.leaveCall);
                 }
 
-                // new message
-                if (data.type === "Message") {
+                // New message — check notification settings before playing
+                if (data.type === "Message" && shouldPlayMessageSound(data)) {
                   playSound(sounds.message);
                 }
-
               } catch {}
             });
           }
